@@ -164,7 +164,9 @@ pin_group = discord.app_commands.Group(
 
 @pin_group.command(name="setup")
 async def pin_setup(
-    itx: discord.Interaction[PinArchiverBot], archive_channel: discord.TextChannel, mode: PinMode = PinMode.oldest
+    itx: discord.Interaction[PinArchiverBot],
+    archive_channel: discord.TextChannel,
+    mode: PinMode = PinMode.oldest,
 ) -> None:
     """Set up your pin archive settings. If you've set them up previously, this will update those settings.
 
@@ -243,7 +245,7 @@ async def pin_disable(itx: discord.Interaction[PinArchiverBot]) -> None:
     assert itx.guild  # Known at runtime.
 
     await itx.response.defer()
-    await asyncio.to_thread(_drop, itx.client.db_connection, itx.guild.id)
+    await itx.client.forget_archive_channel(itx.guild.id)
     await itx.followup.send("The bot will no longer update the pin archive. To re-enable, use `/pin setup`.")
 
 
@@ -292,7 +294,9 @@ class PinArchiverBot(discord.AutoShardedClient):
             self.tree.add_command(cmd)
 
     async def on_guild_channel_pins_update(
-        self, channel: discord.abc.GuildChannel | discord.Thread, last_pin: datetime.datetime | None = None
+        self,
+        channel: discord.abc.GuildChannel | discord.Thread,
+        last_pin: datetime.datetime | None = None,
     ) -> None:
         """Listen to guild-level pin events and move pins as necessary."""
 
@@ -301,7 +305,7 @@ class PinArchiverBot(discord.AutoShardedClient):
             return
 
         try:
-            # Known to exist since this event was triggered. Also  is guarded.
+            # Known to exist since this event was triggered. Also guarded.
             current_pins: list[discord.Message] = await channel.pins()  # type: ignore
         except (AttributeError, discord.HTTPException):
             log.exception(
@@ -337,7 +341,10 @@ class PinArchiverBot(discord.AutoShardedClient):
         log.info("on_guild_channel_pins_update(): %s, %s, %s", channel.guild, channel, last_pin)
 
     async def upsert_archive_channel(
-        self, guild_id: int, channel_id: int, pin_mode: PinMode
+        self,
+        guild_id: int,
+        channel_id: int,
+        pin_mode: PinMode,
     ) -> PinArchiveLocation | None:
         new_location = PinArchiveLocation(guild_id, channel_id, pin_mode)
         locations = await asyncio.to_thread(_upsert, self.db_connection, new_location)
@@ -348,7 +355,10 @@ class PinArchiverBot(discord.AutoShardedClient):
         return locations[0] if locations else None
 
     async def update_archive_channel(
-        self, guild_id: int, channel: discord.TextChannel | None, pin_mode: PinMode | None
+        self,
+        guild_id: int,
+        channel: discord.TextChannel | None,
+        pin_mode: PinMode | None,
     ) -> PinArchiveLocation | None:
         if channel and pin_mode:
             locations = await asyncio.to_thread(
@@ -366,6 +376,9 @@ class PinArchiverBot(discord.AutoShardedClient):
             return None
 
         return locations[0] if locations else None
+
+    async def forget_archive_channel(self, guild_id: int) -> None:
+        await asyncio.to_thread(_drop, self.db_connection, guild_id)
 
 
 def _get_keyring_creds() -> str | None:
