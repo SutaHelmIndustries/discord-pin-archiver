@@ -148,8 +148,8 @@ def create_pin_embed(message: discord.Message) -> discord.Embed:
             name=message.author.display_name,
             icon_url=message.author.display_avatar.url,
         )
-        .add_field(name="Source", value=f"[Jump!]({message.jump_url})")
-        .set_footer(text=f"{message.author.id} • In #{message.channel}")
+        .add_field(name="\u200B", value=f"[*Jump to Source*]({message.jump_url})")
+        .set_footer(text=f"In #{message.channel}")
     )
 
     if message.attachments:
@@ -421,6 +421,9 @@ class PinArchiverBot(discord.AutoShardedClient):
         for cmd in APP_COMMANDS:
             self.tree.add_command(cmd)
 
+        # Sync the tree if it's different from the previous version, using hashing for comparison.
+        await self.tree.sync_if_commands_updated()
+
     async def on_guild_channel_pins_update(
         self,
         channel: discord.abc.GuildChannel | discord.Thread,
@@ -460,9 +463,9 @@ class PinArchiverBot(discord.AutoShardedClient):
                     if old_pin == pin.id:
                         return
 
-                    await pin.unpin(reason="Moving pin to archive channel.")
-                    embed = create_pin_embed(pin)
-                    await archive_channel.send(embed=embed)
+                await pin.unpin(reason="Moving pin to archive channel.")
+                embed = create_pin_embed(pin)
+                await archive_channel.send(embed=embed)
             except (IndexError, discord.HTTPException) as err:
                 _log.exception("", exc_info=err)
 
