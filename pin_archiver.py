@@ -5,17 +5,20 @@ import asyncio
 import datetime
 import enum
 import getpass
+import json
 import logging
 import os
 from collections import deque
 from pathlib import Path
-from typing import NamedTuple, Self
+from typing import Any, NamedTuple, Self
 
 import apsw
 import apsw.bestpractice
 import discord
 import keyring
 import platformdirs
+import xxhash
+from discord import app_commands
 
 try:
     import uvloop  # type: ignore
@@ -25,7 +28,7 @@ except ModuleNotFoundError:
 # Set up logging.
 discord.utils.setup_logging()
 apsw.bestpractice.apply(apsw.bestpractice.recommended)  # type: ignore # SQLite WAL mode, logging, and other things.
-log = logging.getLogger(__name__)
+_log = logging.getLogger(__name__)
 
 platformdir_info = platformdirs.PlatformDirs("discord-pin-archiver", "Sachaa-Thanasius", roaming=False)
 
@@ -154,7 +157,7 @@ def create_pin_embed(message: discord.Message) -> discord.Embed:
     return embed
 
 
-pin_group = discord.app_commands.Group(
+pin_group = app_commands.Group(
     name="pin",
     description="Commands for controlling your pin archive.",
     guild_only=True,
@@ -249,7 +252,44 @@ async def pin_disable(itx: discord.Interaction[PinArchiverBot]) -> None:
     await itx.followup.send("The bot will no longer update the pin archive. To re-enable, use `/pin setup`.")
 
 
-@discord.app_commands.command()
+@app_commands.command(name="help")
+async def _help(itx: discord.Interaction[PinArchiverBot], ephemeral: bool = True) -> None:
+    """See a brief overview of all the bot's available commands.
+
+    Parameters
+    ----------
+    itx : :class:`discord.Interaction`
+        The interaction that triggered this command.
+    ephemeral : :class:`bool`, default=True
+        Whether the output should be visible to only you. Defaults to True.
+    """
+
+    assert itx.client.user  # Known at runtime.
+
+    help_embed = discord.Embed(title="Help")
+
+    for cmd in itx.client.tree.walk_commands():
+        if isinstance(cmd, app_commands.Command):
+            mention = await itx.client.tree.find_mention_for(cmd)
+            description = cmd.callback.__doc__ or cmd.description
+        else:
+            mention = f"/{cmd.name}"
+            description = cmd.__doc__ or cmd.description
+
+        try:
+            index = description.index("Parameters")
+        except ValueError:
+            pass
+        else:
+            description = description[:index]
+
+        help_embed.add_field(name=mention, value=description, inline=False)
+        help_embed.set_thumbnail(url=itx.client.user.display_avatar.url)
+
+    await itx.response.send_message(embed=help_embed, ephemeral=ephemeral)
+
+
+@app_commands.command()
 async def invite(itx: discord.Interaction[PinArchiverBot]) -> None:
     """Get a link to invite this bot to a server."""
 
@@ -258,7 +298,95 @@ async def invite(itx: discord.Interaction[PinArchiverBot]) -> None:
     await itx.response.send_message(embed=embed, view=view, ephemeral=True)
 
 
-APP_COMMANDS = (pin_group, invite)
+APP_COMMANDS = (pin_group, _help, invite)
+
+
+class VersionableTree(app_commands.CommandTree):
+    """A custom command tree to handle autosyncing and save command mentions.
+
+    Credit to LeoCx1000: The implemention for storing mentions of tree commands is his.
+    https://gist.github.com/LeoCx1000/021dc52981299b95ea7790416e4f5ca4
+
+    Credit to @mikeshardmind: The hashing methods in this class are his.
+    https://github.com/mikeshardmind/discord-rolebot/blob/ff0ca542ccc54a5527935839e511d75d3d178da0/rolebot/__main__.py#L486
+    """
+
+    def __init__(self, client: PinArchiverBot, *, fallback_to_global: bool = True) -> None:
+        super().__init__(client, fallback_to_global=fallback_to_global)
+        self.application_commands: dict[int | None, list[app_commands.AppCommand]] = {}
+
+    async def sync(self, *, guild: discord.abc.Snowflake | None = None) -> list[app_commands.AppCommand]:
+        ret = await super().sync(guild=guild)
+        self.application_commands[guild.id if guild else None] = ret
+        return ret
+
+    async def fetch_commands(self, *, guild: discord.abc.Snowflake | None = None) -> list[app_commands.AppCommand]:
+        ret = await super().fetch_commands(guild=guild)
+        self.application_commands[guild.id if guild else None] = ret
+        return ret
+
+    async def find_mention_for(
+        self,
+        command: app_commands.Command[Any, ..., Any],
+        *,
+        guild: discord.abc.Snowflake | None = None,
+    ) -> str | None:
+        """Retrieves the mention of an AppCommand given a specific Command and optionally, a guild.
+
+        Parameters
+        ----------
+        command: :class:`app_commands.Command`
+            The command which it's mention we will attempt to retrieve.
+        guild: :class:`discord.abc.Snowflake` | None
+            The scope (guild) from which to retrieve the commands from. If None is given or not passed, the global
+            scope will be used.
+        """
+
+        try:
+            found_commands = self.application_commands[guild.id if guild else None]
+        except KeyError:
+            found_commands = await self.fetch_commands(guild=guild)
+
+        root_parent = command.root_parent or command
+        command_found = discord.utils.get(found_commands, name=root_parent.name)
+        if command_found:
+            return f"</{command.qualified_name}:{command_found.id}>"
+        return None
+
+    async def get_hash(self) -> bytes:
+        """Generate a unique hash to represent all commands currently in the tree."""
+
+        tree_commands = sorted(self._get_all_commands(guild=None), key=lambda c: c.qualified_name)
+
+        translator = self.translator
+        if translator:
+            payload = [await command.get_translated_payload(translator) for command in tree_commands]
+        else:
+            payload = [command.to_dict() for command in tree_commands]
+
+        return xxhash.xxh3_64_digest(json.dumps(payload).encode("utf-8"), seed=1)
+
+    async def sync_if_commands_updated(self) -> None:
+        """Sync the tree globally if its commands are different from the tree's most recent previous version.
+
+        Comparison is done with hashes, with the hash being stored in a specific file if unique for later comparison.
+
+        Notes
+        -----
+        This uses blocking file IO, so don't run this in situations where that matters. `setup_hook` should be a fine
+        place though.
+        """
+
+        tree_hash = await self.get_hash()
+        tree_hash_path = platformdir_info.user_cache_path / "pin_archiver_tree.hash"
+        tree_hash_path = resolve_path_with_links(tree_hash_path)
+        with tree_hash_path.open("r+b") as fp:
+            data = fp.read()
+            if data != tree_hash:
+                _log.info("New version of the command tree. Syncing now.")
+                await self.sync()
+                fp.seek(0)
+                fp.write(tree_hash)
 
 
 class PinArchiverBot(discord.AutoShardedClient):
@@ -267,7 +395,7 @@ class PinArchiverBot(discord.AutoShardedClient):
             intents=discord.Intents(guilds=True, members=True, guild_messages=True, message_content=True),
             activity=discord.Game(name="https://github.com/Sachaa-Thanasius/discord-pin-archiver"),
         )
-        self.tree = discord.app_commands.CommandTree(self)
+        self.tree = VersionableTree(self)
 
         # Connect to the database that will store the archive information.
         # -- Need to account for the directories and/or file not existing.
@@ -275,7 +403,7 @@ class PinArchiverBot(discord.AutoShardedClient):
         resolved_path_as_str = str(resolve_path_with_links(db_path))
         self.db_connection = apsw.Connection(resolved_path_as_str)
 
-        self._guard_stack: deque[int] = deque()
+        self._guard_stack: deque[int] = deque(maxlen=1)
 
     async def on_connect(self: Self) -> None:
         """(Re)set the client's general invite link every time it (re)connects to the Discord Gateway."""
@@ -308,7 +436,7 @@ class PinArchiverBot(discord.AutoShardedClient):
             # Known to exist since this event was triggered. Also guarded.
             current_pins: list[discord.Message] = await channel.pins()  # type: ignore
         except (AttributeError, discord.HTTPException):
-            log.exception(
+            _log.exception(
                 "Couldn't access the channel's pins: guild_id=%s, channel_id=%s, channel_name=%s",
                 channel.guild.id,
                 channel.id,
@@ -332,13 +460,13 @@ class PinArchiverBot(discord.AutoShardedClient):
                     if old_pin == pin.id:
                         return
 
-                await pin.unpin(reason="Moving pin to archive channel.")
-                embed = create_pin_embed(pin)
-                await archive_channel.send(embed=embed)
+                    await pin.unpin(reason="Moving pin to archive channel.")
+                    embed = create_pin_embed(pin)
+                    await archive_channel.send(embed=embed)
             except (IndexError, discord.HTTPException) as err:
-                log.exception("", exc_info=err)
+                _log.exception("", exc_info=err)
 
-        log.info("on_guild_channel_pins_update(): %s, %s, %s", channel.guild, channel, last_pin)
+        _log.info("on_guild_channel_pins_update(): %s, %s, %s", channel.guild, channel, last_pin)
 
     async def upsert_archive_channel(
         self,
@@ -361,19 +489,18 @@ class PinArchiverBot(discord.AutoShardedClient):
         pin_mode: PinMode | None,
     ) -> PinArchiveLocation | None:
         if channel and pin_mode:
-            locations = await asyncio.to_thread(
-                _query, self.db_connection, UPDATE_CHANNEL_AND_MODE_STATEMENT, (channel.id, pin_mode.value, guild_id)
-            )
+            stmt = UPDATE_CHANNEL_AND_MODE_STATEMENT
+            params = (channel.id, pin_mode.value, guild_id)
         elif channel:
-            locations = await asyncio.to_thread(
-                _query, self.db_connection, UPDATE_CHANNEL_STATEMENT, (channel.id, guild_id)
-            )
+            stmt = UPDATE_CHANNEL_STATEMENT
+            params = (channel.id, guild_id)
         elif pin_mode:
-            locations = await asyncio.to_thread(
-                _query, self.db_connection, UPDATE_MODE_STATEMENT, (pin_mode.value, guild_id)
-            )
+            stmt = UPDATE_MODE_STATEMENT
+            params = (pin_mode.value, guild_id)
         else:
             return None
+
+        locations = await asyncio.to_thread(_query, self.db_connection, stmt, params)
 
         return locations[0] if locations else None
 

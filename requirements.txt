@@ -1,0 +1,5 @@
+apsw>=3.44.2.0
+discord.py>=2.3.2
+keyring>=24.3.0
+platformdirs>=4.0.0
+xxhash>=3.4.1
