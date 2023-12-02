@@ -6,7 +6,13 @@ readme = "README.md"
 license = "MIT"
 requires-python = ">=3.11"
 authors = [{ name = "Sachaa-Thanasius", email = "111999343+Sachaa-Thanasius@users.noreply.github.com" }]
-dependencies = ["apsw>=3.44.2.0", "discord.py>=2.3.2", "keyring>=24.3.0", "platformdirs>=4.0.0", "xxhash>=3.4.1"]
+dependencies = [
+    "apsw>=3.44.2.0",
+    "base2048>=0.1.3",
+    "discord.py>=2.3.2",
+    "platformdirs>=4.0.0",
+    "xxhash>=3.4.1",
+]
 
 [project.urls]
 Homepage = "https://github.com/Sachaa-Thanasius/discord-pin-archiver"

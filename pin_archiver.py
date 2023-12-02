@@ -14,8 +14,8 @@ from typing import Any, NamedTuple, Self
 
 import apsw
 import apsw.bestpractice
+import base2048
 import discord
-import keyring
 import platformdirs
 import xxhash
 from discord import app_commands
@@ -511,21 +511,36 @@ class PinArchiverBot(discord.AutoShardedClient):
         await asyncio.to_thread(_drop, self.db_connection, guild_id)
 
 
-def _get_keyring_creds() -> str | None:
-    user = getpass.getuser()
-    return keyring.get_password("discord-pin-archiver", user)
+def _get_stored_token() -> str | None:
+    secret_file_path = platformdir_info.user_config_path / "pin_archiver.token"
+    secret_file_path = resolve_path_with_links(secret_file_path)
+    with secret_file_path.open("r", encoding="utf-8") as fp:
+        data = fp.read()
+        return base2048.decode(data).decode("utf-8") if data else None
 
 
-def _set_keyring_creds(token: str, /) -> None:
-    user = getpass.getuser()
-    keyring.set_password("discord-pin-archiver", user, token)
+def _store_token(token: str) -> None:
+    secret_file_path = platformdir_info.user_config_path / "pin_archiver.token"
+    secret_file_path = resolve_path_with_links(secret_file_path)
+    with secret_file_path.open("w", encoding="utf-8") as fp:
+        fp.write(base2048.encode(token.encode()))
+
+
+def _input_token() -> None:
+    prompt = "Paste your discord token (won't be visible), then press enter. It will be stored for later use."
+    token = getpass.getpass(prompt)
+    if not token:
+        msg = "Not storing empty token."
+        raise RuntimeError(msg)
+    _store_token(token)
 
 
 def _get_token() -> str:
-    token = os.getenv("PIN_ARCHIVER_TOKEN") or _get_keyring_creds()
+    token = os.getenv("PIN_ARCHIVER_TOKEN") or _get_stored_token()
     if not token:
         msg = (
-            "NO TOKEN? (Use Environment `PIN_ARCHIVER_TOKEN` or launch with `--setup` to go through interactive setup)"
+            "You're missing a Discord bot token. Use '--setup' in the CLI to trigger setup for it, or provide an "
+            "environmental variable labeled 'PIN_ARCHIVER_TOKEN'."
         )
         raise RuntimeError(msg) from None
     return token
@@ -542,18 +557,6 @@ def run_bot() -> None:
         runner.run(bot_runner())
 
 
-def run_setup() -> None:
-    prompt = (
-        "Paste the discord token you'd like to use for this bot here (won't be visible) then press enter. "
-        "This will be stored in the system keyring for later use >"
-    )
-    token = getpass.getpass(prompt)
-    if not token:
-        msg = "Not storing empty token"
-        raise RuntimeError(msg)
-    _set_keyring_creds(token)
-
-
 def main() -> None:
     parser = argparse.ArgumentParser(description="A minimal configuration discord bot for automatic pin archiving.")
     excl = parser.add_mutually_exclusive_group()
@@ -566,9 +569,9 @@ def main() -> None:
     )
     args = parser.parse_args()
     if args.isetup:
-        run_setup()
+        _input_token()
     elif args.token:
-        _set_keyring_creds(args.token)
+        _store_token(args.token)
     else:
         run_bot()
 
