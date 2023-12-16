@@ -157,99 +157,99 @@ def create_pin_embed(message: discord.Message) -> discord.Embed:
     return embed
 
 
-pin_group = app_commands.Group(
-    name="pin",
-    description="Commands for controlling your pin archive.",
-    guild_only=True,
-    default_permissions=discord.Permissions(manage_guild=True),
-)
+class PinGroup(app_commands.Group):
+    def __init__(self) -> None:
+        super().__init__(
+            name="pin",
+            description="Commands for controlling your pin archive.",
+            guild_only=True,
+            default_permissions=discord.Permissions(manage_guild=True),
+        )
 
+    @app_commands.command()
+    async def setup(
+        self,
+        itx: discord.Interaction[PinArchiverBot],
+        archive_channel: discord.TextChannel,
+        mode: PinMode = PinMode.oldest,
+    ) -> None:
+        """Set up your pin archive settings. If you've set them up previously, this will update those settings.
 
-@pin_group.command(name="setup")
-async def pin_setup(
-    itx: discord.Interaction[PinArchiverBot],
-    archive_channel: discord.TextChannel,
-    mode: PinMode = PinMode.oldest,
-) -> None:
-    """Set up your pin archive settings. If you've set them up previously, this will update those settings.
+        Attributes
+        ----------
+        itx: :class:`discord.Interaction`
+            The invocation interaction.
+        archive_channel: :class:`discord.TextChannel`
+            The channel where the pins will be stored.
+        mode: :class:`PinMode`, default=PinMode.oldest
+            Which pin gets sent to the pin archive channel whenever a new message is pinned and there are no pins left.
+        """
 
-    Attributes
-    ----------
-    itx: :class:`discord.Interaction`
-        The invocation interaction.
-    archive_channel: :class:`discord.TextChannel`
-        The channel where the pins will be stored.
-    mode: :class:`PinMode`, default=PinMode.oldest
-        Which pin gets sent to the pin archive channel whenever a new message is pinned and there are no pins left.
-    """
+        assert itx.guild  # Known at runtime.
 
-    assert itx.guild  # Known at runtime.
+        await itx.response.defer()
+        location = await itx.client.upsert_archive_channel(itx.guild.id, archive_channel.id, mode)
+        if location:
+            await itx.followup.send(embed=location.embed())
 
-    await itx.response.defer()
-    location = await itx.client.upsert_archive_channel(itx.guild.id, archive_channel.id, mode)
-    if location:
-        await itx.followup.send(embed=location.embed())
+    @app_commands.command()
+    async def update(
+        self,
+        itx: discord.Interaction[PinArchiverBot],
+        archive_channel: discord.TextChannel | None = None,
+        mode: PinMode | None = None,
+    ) -> None:
+        """Updates your pin archive settings. Every input is optional: If not given, the previously set value will be kept.
 
+        Attributes
+        ----------
+        itx: :class:`discord.Interaction`
+            The invocation interaction.
+        archive_channel: :class:`discord.TextChannel`, optional
+            The channel where the pins will be stored. Defaults to None.
+        mode: :class:`PinMode`, optional
+            Which pin gets sent to the pin archive channel whenever a new message is pinned and there are no pins left. Defaults to None.
+        """
 
-@pin_group.command(name="update")
-async def pin_update(
-    itx: discord.Interaction[PinArchiverBot],
-    archive_channel: discord.TextChannel | None = None,
-    mode: PinMode | None = None,
-) -> None:
-    """Updates your pin archive settings. Every input is optional: If not given, the previously set value will be kept.
+        assert itx.guild  # Known at runtime.
 
-    Attributes
-    ----------
-    itx: :class:`discord.Interaction`
-        The invocation interaction.
-    archive_channel: :class:`discord.TextChannel`, optional
-        The channel where the pins will be stored. Defaults to None.
-    mode: :class:`PinMode`, optional
-        Which pin gets sent to the pin archive channel whenever a new message is pinned and there are no pins left. Defaults to None.
-    """
+        await itx.response.defer()
 
-    assert itx.guild  # Known at runtime.
+        if not archive_channel and not mode:
+            await itx.followup.send("No new settings put in: No changes made.")
+            return
 
-    await itx.response.defer()
+        location = await itx.client.update_archive_channel(itx.guild.id, archive_channel, mode)
+        if location:
+            embed = location.embed()
+            embed.title = "Updated Pin Archive Settings"
+            await itx.followup.send(embed=embed)
 
-    if not archive_channel and not mode:
-        await itx.followup.send("No new settings put in: No changes made.")
-        return
+    @app_commands.command()
+    async def current(self, itx: discord.Interaction[PinArchiverBot]) -> None:
+        """Displays the current pin archive settings for this server."""
 
-    location = await itx.client.update_archive_channel(itx.guild.id, archive_channel, mode)
-    if location:
-        embed = location.embed()
-        embed.title = "Updated Pin Archive Settings"
-        await itx.followup.send(embed=embed)
+        assert itx.guild  # Known at runtime.
 
+        await itx.response.defer()
+        location = await itx.client.get_archive_channel(itx.guild.id)
+        if location:
+            await itx.followup.send(embed=location.embed())
+        else:
+            await itx.followup.send("The pin archive has not be set up for this server.")
 
-@pin_group.command(name="current")
-async def pin_current(itx: discord.Interaction[PinArchiverBot]) -> None:
-    """Displays the current pin archive settings for this server."""
+    @app_commands.command()
+    async def disable(self, itx: discord.Interaction[PinArchiverBot]) -> None:
+        """Disable the pin archive in this server. The bot will no longer actively move pins.
 
-    assert itx.guild  # Known at runtime.
+        Note: If you wish to enable this again, use /pin setup.
+        """
 
-    await itx.response.defer()
-    location = await itx.client.get_archive_channel(itx.guild.id)
-    if location:
-        await itx.followup.send(embed=location.embed())
-    else:
-        await itx.followup.send("The pin archive has not be set up for this server.")
+        assert itx.guild  # Known at runtime.
 
-
-@pin_group.command(name="disable")
-async def pin_disable(itx: discord.Interaction[PinArchiverBot]) -> None:
-    """Disable the pin archive in this server. The bot will no longer actively move pins.
-
-    Note: If you wish to enable this again, use /pin setup.
-    """
-
-    assert itx.guild  # Known at runtime.
-
-    await itx.response.defer()
-    await itx.client.forget_archive_channel(itx.guild.id)
-    await itx.followup.send("The bot will no longer update the pin archive. To re-enable, use `/pin setup`.")
+        await itx.response.defer()
+        await itx.client.forget_archive_channel(itx.guild.id)
+        await itx.followup.send("The bot will no longer update the pin archive. To re-enable, use `/pin setup`.")
 
 
 @app_commands.command(name="help")
@@ -276,12 +276,13 @@ async def _help(itx: discord.Interaction[PinArchiverBot], ephemeral: bool = True
             mention = f"/{cmd.name}"
             description = cmd.__doc__ or cmd.description
 
-        try:
-            index = description.index("Parameters")
-        except ValueError:
-            pass
-        else:
-            description = description[:index]
+        for header in ("Parameters", "Attributes"):
+            try:
+                index = description.index(header)
+            except ValueError:
+                pass
+            else:
+                description = description[:index]
 
         help_embed.add_field(name=mention, value=description, inline=False)
         help_embed.set_thumbnail(url=itx.client.user.display_avatar.url)
@@ -298,7 +299,7 @@ async def invite(itx: discord.Interaction[PinArchiverBot]) -> None:
     await itx.response.send_message(embed=embed, view=view, ephemeral=True)
 
 
-APP_COMMANDS = (pin_group, _help, invite)
+APP_COMMANDS = (PinGroup(), _help, invite)
 
 
 class VersionableTree(app_commands.CommandTree):
@@ -456,18 +457,18 @@ class PinArchiverBot(discord.AutoShardedClient):
             try:
                 pin = current_pins[-1] if (location.pin_mode is PinMode.oldest) else current_pins[0]
                 try:
-                    old_pin = self._guard_stack.pop()
+                    old_pin_id = self._guard_stack.pop()
                 except IndexError:
                     self._guard_stack.append(pin.id)
                 else:
-                    if old_pin == pin.id:
+                    if old_pin_id == pin.id:
                         return
 
                 await pin.unpin(reason="Moving pin to archive channel.")
                 embed = create_pin_embed(pin)
                 await archive_channel.send(embed=embed)
-            except (IndexError, discord.HTTPException) as err:
-                _log.exception("", exc_info=err)
+            except (IndexError, discord.HTTPException):
+                _log.exception("Error occured while attempting to transfer pin.")
 
         _log.info("on_guild_channel_pins_update(): %s, %s, %s", channel.guild, channel, last_pin)
 
@@ -492,14 +493,11 @@ class PinArchiverBot(discord.AutoShardedClient):
         pin_mode: PinMode | None,
     ) -> PinArchiveLocation | None:
         if channel and pin_mode:
-            stmt = UPDATE_CHANNEL_AND_MODE_STATEMENT
-            params = (channel.id, pin_mode.value, guild_id)
+            stmt, params = UPDATE_CHANNEL_AND_MODE_STATEMENT, (channel.id, pin_mode.value, guild_id)
         elif channel:
-            stmt = UPDATE_CHANNEL_STATEMENT
-            params = (channel.id, guild_id)
+            stmt, params = UPDATE_CHANNEL_STATEMENT, (channel.id, guild_id)
         elif pin_mode:
-            stmt = UPDATE_MODE_STATEMENT
-            params = (pin_mode.value, guild_id)
+            stmt, params = UPDATE_MODE_STATEMENT, (pin_mode.value, guild_id)
         else:
             return None
 
