@@ -27,7 +27,7 @@ except ModuleNotFoundError:
 
 # Set up logging.
 discord.utils.setup_logging()
-apsw.bestpractice.apply(apsw.bestpractice.recommended)  # type: ignore # SQLite WAL mode, logging, and other things.
+apsw.bestpractice.apply(apsw.bestpractice.recommended)  # pyright: ignore[reportUnknownMemberType]
 _log = logging.getLogger(__name__)
 
 platformdir_info = platformdirs.PlatformDirs("discord-pin-archiver", "Sachaa-Thanasius", roaming=False)
@@ -148,7 +148,7 @@ def create_pin_embed(message: discord.Message) -> discord.Embed:
             name=message.author.display_name,
             icon_url=message.author.display_avatar.url,
         )
-        .add_field(name="\u200B", value=f"[*Jump to Source*]({message.jump_url})")
+        .add_field(name="\u200b", value=f"[*Jump to Source*]({message.jump_url})")
         .set_footer(text=f"In #{message.channel}")
     )
 
@@ -199,7 +199,8 @@ class PinGroup(app_commands.Group):
         archive_channel: discord.TextChannel | None = None,
         mode: PinMode | None = None,
     ) -> None:
-        """Updates your pin archive settings. Every input is optional: If not given, the previously set value will be kept.
+        """Updates your pin archive settings. Every input is optional: if not given, the previously set value will be
+        kept.
 
         Attributes
         ----------
@@ -208,7 +209,8 @@ class PinGroup(app_commands.Group):
         archive_channel: :class:`discord.TextChannel`, optional
             The channel where the pins will be stored. Defaults to None.
         mode: :class:`PinMode`, optional
-            Which pin gets sent to the pin archive channel whenever a new message is pinned and there are no pins left. Defaults to None.
+            Which pin gets sent to the pin archive channel whenever a new message is pinned and there are no pins left.
+            Defaults to None.
         """
 
         assert itx.guild  # Known at runtime.
@@ -394,7 +396,7 @@ class PinArchiverBot(discord.AutoShardedClient):
     def __init__(self) -> None:
         super().__init__(
             intents=discord.Intents(guilds=True, members=True, guild_messages=True, message_content=True),
-            activity=discord.Game(name="https://github.com/Sachaa-Thanasius/discord-pin-archiver"),
+            activity=discord.Game(name="https://github.com/SutaHelmIndustries/discord-pin-archiver"),
         )
         self.tree = VersionableTree(self)
 
@@ -440,12 +442,7 @@ class PinArchiverBot(discord.AutoShardedClient):
             # Known to exist since this event was triggered. Also guarded.
             current_pins: list[discord.Message] = await channel.pins()  # type: ignore
         except (AttributeError, discord.HTTPException):
-            _log.exception(
-                "Couldn't access the channel's pins: guild_id=%s, channel_id=%s, channel_name=%s",
-                channel.guild.id,
-                channel.id,
-                channel.mention,
-            )
+            _log.exception("Couldn't access the channel's pins: channel=%r", channel)
         else:
             assert isinstance(current_pins, list)
             if len(current_pins) < 49:
@@ -480,11 +477,11 @@ class PinArchiverBot(discord.AutoShardedClient):
     ) -> PinArchiveLocation | None:
         new_location = PinArchiveLocation(guild_id, channel_id, pin_mode)
         locations = await asyncio.to_thread(_upsert, self.db_connection, new_location)
-        return locations[0] if locations else None
+        return next(iter(locations), None)
 
     async def get_archive_channel(self, guild_id: int) -> PinArchiveLocation | None:
         locations = await asyncio.to_thread(_query, self.db_connection, SELECT_BY_GUILD_STATEMENT, (guild_id,))
-        return locations[0] if locations else None
+        return next(iter(locations), None)
 
     async def update_archive_channel(
         self,
@@ -503,7 +500,7 @@ class PinArchiverBot(discord.AutoShardedClient):
 
         locations = await asyncio.to_thread(_query, self.db_connection, stmt, params)
 
-        return locations[0] if locations else None
+        return next(iter(locations), None)
 
     async def forget_archive_channel(self, guild_id: int) -> None:
         await asyncio.to_thread(_drop, self.db_connection, guild_id)

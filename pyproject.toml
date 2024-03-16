@@ -1,26 +1,31 @@
 [project]
 name = "discord-pin-archiver"
-version = "0.0.1"
+version = "2024.03.15"
 description = "A simple Discord bot for storing extra pins in a channel."
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.11"
-authors = [{ name = "Sachaa-Thanasius", email = "111999343+Sachaa-Thanasius@users.noreply.github.com" }]
+authors = [
+    { name = "Sachaa-Thanasius", email = "111999343+Sachaa-Thanasius@users.noreply.github.com" },
+]
 dependencies = [
     "apsw>=3.44.2.0",
     "base2048>=0.1.3",
     "discord.py>=2.3.2",
     "platformdirs>=4.0.0",
+    "uvloop>=0.17.0;sys_platform=='linux'",
     "xxhash>=3.4.1",
 ]
 
 [project.urls]
-Homepage = "https://github.com/Sachaa-Thanasius/discord-pin-archiver"
-"Bug Tracker" = "https://github.com/Sachaa-Thanasius/discord-pin-archiver/issues"
+Homepage = "https://github.com/SutaHelmIndustries/discord-pin-archiver"
+"Bug Tracker" = "https://github.com/SutaHelmIndustries/discord-pin-archiver/issues"
 
 [tool.ruff]
 line-length = 120
 target-version = "py311"
+
+[tool.ruff.lint]
 select = [
     "F",
     "E",
@@ -41,46 +46,46 @@ select = [
     "INP",
     "PIE",
     "T20",
-    "Q003",
+    "PYI",
     "RSE",
     "RET",
     "SIM",
     "TID",
     "PTH",
     "ERA",
-    "PLC",
-    "PLE",
-    "PLR",
-    "PLW",
-    "TRY",
-    "RUF",
-    "NPY",
     "PD",
+    "PL",
+    "TRY",
+    "NPY",
+    "RUF",
 ]
 extend-ignore = [
-    "G002",    # Erroneous issue with %-logging when logging can be configured for % logging.
-    "S101",    # Use of assert here is a known quantity. Blame typing memes.
-    "PLR2004", # Magic value comparison. May remove later.
-    "SIM105",  # Suppressable exception. I'm not paying the overhead of contextlib.suppress for stylistic choices.
-    "C90",     # McCabe complexity memes.
-    "ANN101",  # "Self" annotation for self is implicit.
-    "ANN102",  # Same, but for cls.
-    "ANN204",  # Special method return types are implicit.
-    "ANN401",  # Need Any for args and kwargs.
-    "PLR0913", # Number of parameters in a function definition doesn't matter.
-    "A002",    # Shadowing some built-in names.
-    "COM812",  # Recommended by ruff when using ruff format.
-    "COM819",  # Recommended by ruff when using ruff format.
-    "E501",    # Recommended by ruff when using ruff format.
-    "ISC001",  # Recommended by ruff when using ruff format.
-    "Q003",    # Recommended by ruff when using ruff format.
+    "S101", # Use of assert here is a known quantity. Blame typing memes.
+    # "PLR2004", # Magic value comparison. May remove later.
+    "SIM105", # Suppressable exception. contextlib.suppress is a stylistic choice with overhead.
+    "C90",    # McCabe complexity memes.
+    "ANN101", # Type of self is usually implicit.
+    "ANN102", # Type of cls is usually implicit.
+    "ANN204", # Special method return types are implicit and/or known by type-checkers.
+    "ANN401", # Need Any for args and kwargs.
+    "PLR",    # Complexity things.
+    "A002",   # Shadowing some built-in names.
+    # Recommended by Ruff when using Ruff format.
+    "E111",
+    "E114",
+    "E117",
+    "Q003",
+    "COM812",
+    "COM819",
+    # "E501",
+    "ISC001",
+    "ISC002",
 ]
 unfixable = [
     "ERA", # I don't want anything erroneously detected deleted by this.
 ]
 
-
-[tool.ruff.isort]
+[tool.ruff.lint.isort]
 combine-as-imports = true
 
 [tool.pyright]
