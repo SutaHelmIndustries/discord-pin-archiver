@@ -33,11 +33,19 @@ _log = logging.getLogger(__name__)
 platformdir_info = platformdirs.PlatformDirs("discord-pin-archiver", "Sachaa-Thanasius", roaming=False)
 
 
-INITIALIZATION_STATEMENT = """
+INITIALIZATION_STATEMENTS = """
 CREATE TABLE IF NOT EXISTS pin_archive_settings (
     guild_id    INTEGER     PRIMARY KEY,
     channel_id  INTEGER     NOT NULL,
     pin_mode    INTEGER     NOT NULL
+) STRICT, WITHOUT ROWID;
+
+CREATE TABLE IF NOT EXISTS pin_archive_channel_overrides (
+    guild_id            INTEGER     REFERENCES pin_archive_settings(guild_id)   ON UPDATE CASCADE ON DELETE CASCADE,
+    channel_id          INTEGER     NOT NULL,
+    pin_mode_override   INTEGER     NOT NULL,
+    exclude             BOOLEAN     DEFAULT FALSE,
+    PRIMARY KEY (guild_id, channel_id)
 ) STRICT, WITHOUT ROWID;
 """
 
@@ -99,7 +107,7 @@ class PinArchiveLocation(NamedTuple):
 def _setup_db(conn: apsw.Connection) -> None:
     with conn:
         cursor = conn.cursor()
-        cursor.execute(INITIALIZATION_STATEMENT)
+        cursor.execute(INITIALIZATION_STATEMENTS)
 
 
 def _query(conn: apsw.Connection, query_str: str, params: apsw.Bindings | None = None) -> list[PinArchiveLocation]:
@@ -155,6 +163,28 @@ def create_pin_embed(message: discord.Message) -> discord.Embed:
     if message.attachments:
         embed.set_image(url=message.attachments[0].url)
     return embed
+
+
+class PinSettingsView(discord.ui.View):
+    # For the display we need:
+    # - A select of all channels
+    # - A button for changing pin mode. Applies to selected channels, or global if none selected.
+    # - A button for exclusion. Applies to selected channels, or global if none selected.
+
+    @discord.ui.select(cls=discord.ui.ChannelSelect, placeholder="Select the channels to modify here...")
+    async def channel_select(
+        self,
+        itx: discord.Interaction[PinArchiverBot],
+        select: discord.ui.ChannelSelect[Self],
+    ) -> None: ...
+
+    @discord.ui.button(label="Set mode to")
+    async def mode_override(self, itx: discord.Interaction[PinArchiverBot], button: discord.ui.Button[Self]) -> None:
+        ...
+
+    @discord.ui.button(label="Exclude")
+    async def exclude_set(self, itx: discord.Interaction[PinArchiverBot], button: discord.ui.Button[Self]) -> None:
+        ...
 
 
 class PinGroup(app_commands.Group):
@@ -252,6 +282,12 @@ class PinGroup(app_commands.Group):
         await itx.response.defer()
         await itx.client.forget_archive_channel(itx.guild.id)
         await itx.followup.send("The bot will no longer update the pin archive. To re-enable, use `/pin setup`.")
+
+    @app_commands.command()
+    async def test(self, itx: discord.Interaction[PinArchiverBot]) -> None:
+        assert itx.guild  # Known at runtime
+
+        await itx.response.defer()
 
 
 @app_commands.command(name="help")
